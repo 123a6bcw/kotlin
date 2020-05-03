@@ -17,8 +17,8 @@ import org.jetbrains.kotlin.resolve.multiplatform.findExpects
 fun referenceExpectsForUsedActuals(expectDescriptorToSymbol: MutableMap<DeclarationDescriptor, IrSymbol>, symbolTable: SymbolTable, irModule: IrModuleFragment) {
     irModule.acceptVoid(object : IrElementVisitorVoid {
 
-        private fun <T> T.forEachExpect(body: (DeclarationDescriptor) -> Unit) where T: IrDeclaration {
-            this.descriptor.findExpects().forEach {
+        private fun <T> T.forEachExpect(body: (DeclarationDescriptor) -> Unit) where T : IrSymbolOwner {
+            this.symbol.trueDescriptor.findExpects().forEach {
                 body(it)
             }
         }

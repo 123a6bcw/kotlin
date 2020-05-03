@@ -39,7 +39,7 @@ abstract class IrModuleDeserializer(val moduleDescriptor: ModuleDescriptor) {
 
     open fun declareIrSymbol(symbol: IrSymbol) {
         assert(symbol.isPublicApi)
-        assert(symbol.descriptor !is WrappedDeclarationDescriptor<*>)
+        assert(symbol.trueDescriptor !is WrappedDeclarationDescriptor<*>)
         deserializeIrSymbol(symbol.signature, symbol.kind())
     }
 
