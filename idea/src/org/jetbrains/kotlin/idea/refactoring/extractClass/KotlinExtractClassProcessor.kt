@@ -17,13 +17,15 @@ import org.jetbrains.kotlin.psi.KtTypeParameter
 
 class KotlinExtractClassProcessor(
     private val sourceClass: KtClassOrObject,
-    private val memberInfos: List<KotlinMemberInfo>,
+    val memberInfos: List<KotlinMemberInfo>,
     private val targetFile: PsiElement,
     private val targetClassName: String,
     private val targetPackage: String,
     private val leaveDelegates: Boolean,
-    val docPolicy: DocCommentPolicy<*>
+    val docPolicy: DocCommentPolicy<*>  //TODO realise docPolicy usage (or remove)
 ) {
+    //TODO conflicts checking
+
     private val project = sourceClass.project
 
     private val extractedMemberDeclarations: List<KtDeclaration> = memberInfos.map { info -> info.member }
@@ -34,19 +36,24 @@ class KotlinExtractClassProcessor(
             return parent != sourceClass && parent is KtObjectDeclaration && parent.isCompanion()
         }
 
-    private fun collectDataForBuilding(): Pair<ExtractedClassBuilder, ExtractedClassBuilder?> {
+    private lateinit var extractedClassBuilder: ExtractedClassBuilder
+    private var companionObjectBuilder: ExtractedClassBuilder? = null
+
+    private fun collectDataForBuilding() {
         val companionObjectExtractedDeclarations = extractedMemberDeclarations.filter { it.inCompanionObject }
 
-        val companionObjectBuilder =
-            if (companionObjectExtractedDeclarations.isNotEmpty()) {
+        companionObjectBuilder =
+            if (companionObjectExtractedDeclarations.isNotEmpty() && sourceClass.companionObjects.isNotEmpty()) {
                 val companionObject = sourceClass.companionObjects[0]
-                //todo assert?
-                ExtractedClassBuilder(
+
+                ExtractedClassBuilder.analyzeContextAndGetBuilder(
                     companionObject,
+                    true,
                     companionObjectExtractedDeclarations,
                     extractedMemberDeclarations,
-                    true,
-                    "",
+                    listOf(),
+                    companionObject.name,
+                    targetPackage,
                     leaveDelegates
                 )
             } else {
@@ -55,13 +62,22 @@ class KotlinExtractClassProcessor(
 
         val extractedClassTypeParameters = collectTypeParameters()
         val sourceExtractedDeclarations = extractedMemberDeclarations.filter { !it.inCompanionObject }
-        val extractedClassBuilder =
-            ExtractedClassBuilder(sourceClass, sourceExtractedDeclarations, extractedMemberDeclarations, false, "", leaveDelegates)
 
-        return Pair(extractedClassBuilder, companionObjectBuilder)
+        extractedClassBuilder =
+            ExtractedClassBuilder.analyzeContextAndGetBuilder(
+                sourceClass,
+                false,
+                sourceExtractedDeclarations,
+                extractedMemberDeclarations,
+                extractedClassTypeParameters,
+                targetClassName,
+                targetPackage,
+                leaveDelegates
+            )
     }
 
     private fun collectTypeParameters(): List<KtTypeParameter> {
+        //TODO
         return listOf()
     }
 
@@ -77,6 +93,7 @@ class KotlinExtractClassProcessor(
     }
 
     fun run() {
+        //TODO
         project.executeWriteCommand("name") {
         }
     }

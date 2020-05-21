@@ -26,6 +26,8 @@ class MakeDelegate(private val element: KtElement, private val delegate: String,
     override fun fixUsage() {
         if (element is KtFunction) {
             makeFunctionDelegate()
+        } else {
+            //TODO property, class etc
         }
     }
 

@@ -24,19 +24,22 @@ import org.jetbrains.kotlin.lexer.KtModifierKeywordToken
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
 
-class ExtractedClassBuilder(
+class ExtractedClassBuilder private constructor(
     private val sourceClass: KtClassOrObject,
+    private val isCompanionObject: Boolean,
     private val thisClassExtractedDeclarations: List<KtDeclaration>,
     private val allExtractedDeclaration: List<KtDeclaration>,
-    private val isCompanionObject: Boolean,
+    extractedClassTypeParameters: List<KtTypeParameter>, //TODO add type parameters to extracted class
     private val targetName: String?,
+    targetPackage: String, //TODO add package and FQ names usage, shorten references
     private val leaveDelegates: Boolean
 ) {
+    private val project = sourceClass.project
+    private val ktFactory = KtPsiFactory(project)
+
     private val argumentsAddedToExtractedClassConstructor: List<KtParameter>
     private val implementedClassesOrInterfaces: List<KtSuperTypeListEntry>
     private val usagesToFix: List<FixableUsageInfo>
-    private val project = sourceClass.project
-    private val ktFactory = KtPsiFactory(project)
 
     private val originalClass = if (isCompanionObject) {
         sourceClass.parent
@@ -104,12 +107,14 @@ class ExtractedClassBuilder(
         val result = mutableListOf<KtSuperTypeListEntry>()
 
         for (superType in sourceClass.superTypeListEntries) {
-            val superInterface: KtClassOrObject? = null //TODO
-            var supported = true
+            val superInterface: KtClassOrObject? =
+                null //TODO resolve KtClass from KtSuperTypeListEntry. An example was at superclass refactoring
 
             if (superInterface == null || !superInterface.isInterfaceClass()) {
                 continue
             }
+
+            var interfaceRealised = true
 
             val interfaceDeclarations = superInterface.declarations
             for (sourceDeclaration in sourceClass.declarations) {
@@ -122,16 +127,17 @@ class ExtractedClassBuilder(
                     continue
                 }
 
+                //TODO Probably there is an easier way to check this (without descriptors)
                 for (overriddenDescriptor in descriptor.overriddenDescriptors) {
                     if (overriddenDescriptor.findPsi() in interfaceDeclarations) {
                         if (sourceDeclaration !in thisClassExtractedDeclarations) {
-                            supported = false
+                            interfaceRealised = false
                         }
                     }
                 }
             }
 
-            if (supported) {
+            if (interfaceRealised) {
                 result.add(superType)
             }
         }
@@ -150,15 +156,17 @@ class ExtractedClassBuilder(
     }
 
     private fun getDelegationFieldName(name: String?): String {
-        val thisName = name ?: "companion" //TODO
+        //TODO
+
+        val thisName = name ?: "companion" //TODO come up with the name for companion objects
 
         val simpleClassName = thisName.substring(thisName.lastIndexOf('.') + 1).decapitalize()
-        //TODO
 
         return simpleClassName
     }
 
     private fun collectUsagesToFix(): List<FixableUsageInfo> {
+        //TODO visibility modifiers, docPolicy, sealed class
         val result = mutableListOf<FixableUsageInfo>()
 
         for (declaration in thisClassExtractedDeclarations) {
@@ -212,5 +220,29 @@ class ExtractedClassBuilder(
         }
 
         return result
+    }
+
+    companion object FACTORY {
+        fun analyzeContextAndGetBuilder(
+            sourceClass: KtClassOrObject,
+            isCompanionObject: Boolean,
+            thisClassExtractedDeclarations: List<KtDeclaration>,
+            allExtractedDeclaration: List<KtDeclaration>,
+            extractedClassTypeParameters: List<KtTypeParameter>,
+            targetName: String?,
+            targetPackage: String,
+            leaveDelegates: Boolean
+        ): ExtractedClassBuilder {
+            return ExtractedClassBuilder(
+                sourceClass,
+                isCompanionObject,
+                thisClassExtractedDeclarations,
+                allExtractedDeclaration,
+                extractedClassTypeParameters,
+                targetName,
+                targetPackage,
+                leaveDelegates
+            )
+        }
     }
 }
