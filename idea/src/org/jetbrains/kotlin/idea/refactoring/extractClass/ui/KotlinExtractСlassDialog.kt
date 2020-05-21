@@ -24,6 +24,7 @@ import com.intellij.refactoring.ui.PackageNameReferenceEditorCombo
 import com.intellij.refactoring.ui.RefactoringDialog
 import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.ReferenceEditorComboWithBrowseButton
+import org.jetbrains.kotlin.idea.refactoring.extractClass.KotlinExtractClassProcessor
 import org.jetbrains.kotlin.idea.refactoring.memberInfo.KotlinMemberInfo
 import org.jetbrains.kotlin.idea.refactoring.memberInfo.extractClassMembers
 import org.jetbrains.kotlin.psi.KtClassOrObject
@@ -34,11 +35,17 @@ import javax.swing.JComponent
 import javax.swing.JTextField
 import javax.swing.event.DocumentEvent
 
-class ExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDialog(sourceClass.project, true) {
+class KotlinExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDialog(sourceClass.project, true) {
     private val memberInfos: List<KotlinMemberInfo> = listOf()
+
     private val extractedClassNameField = JTextField()
+    private val extractedClassName: String
+        get() {
+            return extractedClassNameField.text.trim()
+        }
+
     private val extractedClassPackageField: ReferenceEditorComboWithBrowseButton
-    private val packageName: String
+    private val extractedPackageName: String
         get() {
             return extractedClassPackageField.text.trim()
         }
@@ -55,11 +62,11 @@ class ExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDialog(s
 
     private val destinationFolderComboBox = object : DestinationFolderComboBox() {
         override fun getTargetPackage(): String {
-            return packageName
+            return extractedPackageName
         }
     }
 
-    private val extractMemberInfoModel = object: AbstractMemberInfoModel<KtNamedDeclaration, KotlinMemberInfo>() {
+    private val extractMemberInfoModel = object : AbstractMemberInfoModel<KtNamedDeclaration, KotlinMemberInfo>() {
         val memberInfos: List<KotlinMemberInfo> = extractClassMembers(sourceClass)
     }
 
@@ -98,7 +105,7 @@ class ExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDialog(s
     }
 
     override fun doAction() {
-        TODO("Not yet implemented")
+        KotlinExtractClassProcessor(sourceClass, memberInfos, targetFile,)
     }
 
     override fun createCenterPanel(): JComponent? {

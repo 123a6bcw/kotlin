@@ -20,7 +20,8 @@ import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.KtFunction
 import org.jetbrains.kotlin.psi.KtPsiFactory
 
-class MakeDelegate(private val element: KtElement, private val delegate: String, private val ktPsiFactory: KtPsiFactory) : FixableUsageInfo(element) {
+class MakeDelegate(private val element: KtElement, private val delegate: String, private val ktPsiFactory: KtPsiFactory) :
+    FixableUsageInfo(element) {
 
     override fun fixUsage() {
         if (element is KtFunction) {

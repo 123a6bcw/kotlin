@@ -5,15 +5,15 @@
 
 package org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage
 
-import com.intellij.psi.codeStyle.CodeStyleManager
 import com.intellij.refactoring.util.FixableUsageInfo
-import org.jetbrains.kotlin.idea.core.ShortenReferences
-import org.jetbrains.kotlin.idea.core.formatter.KotlinCodeStyleSettings
-import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.psi.KtPsiFactory
 import org.jetbrains.kotlin.psi.KtReferenceExpression
 
-class ReplaceReferenceByText(private val element: KtReferenceExpression, private val newReference: String, private val ktFactory: KtPsiFactory) : FixableUsageInfo(element) {
+class ReplaceReferenceByText(
+    private val element: KtReferenceExpression,
+    private val newReference: String,
+    private val ktFactory: KtPsiFactory
+) : FixableUsageInfo(element) {
 
     override fun fixUsage() {
         val expression = ktFactory.createExpression(newReference)

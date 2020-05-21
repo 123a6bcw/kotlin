@@ -6,7 +6,6 @@
 package org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage
 
 import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiReference
 import com.intellij.refactoring.util.FixableUsageInfo
 
 class AddDelegationFieldQualifier(reference: PsiElement, delegationFieldName: String) : FixableUsageInfo(reference) {

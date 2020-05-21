@@ -15,7 +15,7 @@ import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtObjectDeclaration
 import org.jetbrains.kotlin.psi.KtTypeParameter
 
-class ExtractClassProcessor(
+class KotlinExtractClassProcessor(
     private val sourceClass: KtClassOrObject,
     private val memberInfos: List<KotlinMemberInfo>,
     private val targetFile: PsiElement,

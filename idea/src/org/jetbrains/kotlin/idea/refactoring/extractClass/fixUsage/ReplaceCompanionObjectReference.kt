@@ -6,11 +6,11 @@
 package org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage
 
 import com.intellij.psi.PsiElement
-import com.intellij.psi.PsiReference
 import com.intellij.refactoring.util.FixableUsageInfo
 import org.jetbrains.kotlin.psi.KtClassOrObject
 
-class ReplaceCompanionObjectReference(reference: PsiElement, sourceClass: KtClassOrObject, targetName: String?) : FixableUsageInfo(reference) {
+class ReplaceCompanionObjectReference(reference: PsiElement, sourceClass: KtClassOrObject, targetName: String?) :
+    FixableUsageInfo(reference) {
     override fun fixUsage() {
         //TODO
     }
