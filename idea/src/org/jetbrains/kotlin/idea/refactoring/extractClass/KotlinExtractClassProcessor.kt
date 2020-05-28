@@ -5,30 +5,39 @@
 
 package org.jetbrains.kotlin.idea.refactoring.extractClass
 
-import com.intellij.psi.PsiElement
 import com.intellij.psi.util.parentOfType
-import com.intellij.refactoring.util.DocCommentPolicy
+import com.intellij.refactoring.RefactoringBundle
+import com.intellij.refactoring.memberPullUp.PullUpProcessor
+import org.jetbrains.kotlin.idea.codeInsight.shorten.performDelayedRefactoringRequests
+import org.jetbrains.kotlin.idea.core.util.runSynchronouslyWithProgress
+import org.jetbrains.kotlin.idea.refactoring.introduce.extractClass.KotlinExtractSuperclassHandler
 import org.jetbrains.kotlin.idea.refactoring.memberInfo.KotlinMemberInfo
 import org.jetbrains.kotlin.idea.util.application.executeWriteCommand
-import org.jetbrains.kotlin.psi.KtClassOrObject
-import org.jetbrains.kotlin.psi.KtDeclaration
-import org.jetbrains.kotlin.psi.KtObjectDeclaration
-import org.jetbrains.kotlin.psi.KtTypeParameter
+import org.jetbrains.kotlin.idea.util.application.runReadAction
+import org.jetbrains.kotlin.psi.*
 
 class KotlinExtractClassProcessor(
     private val sourceClass: KtClassOrObject,
     val memberInfos: List<KotlinMemberInfo>,
-    private val targetFile: PsiElement,
     private val targetClassName: String,
     private val targetPackage: String,
+    private val createInTheSameFile: Boolean,
     private val leaveDelegates: Boolean,
-    val docPolicy: DocCommentPolicy<*>  //TODO realise docPolicy usage (or remove)
+    private val fixVisibilities: Boolean,
+    //TODO realise docPolicy usage (or remove)
 ) {
     //TODO conflicts checking
 
     private val project = sourceClass.project
 
     private val extractedMemberDeclarations: List<KtDeclaration> = memberInfos.map { info -> info.member }
+
+    private val targetFile =
+        if (createInTheSameFile) {
+            sourceClass.containingKtFile
+        } else {
+            KtPsiFactory(project).createFile(targetClassName, "")
+        }
 
     private val KtDeclaration.inCompanionObject: Boolean
         get() {
@@ -93,8 +102,14 @@ class KotlinExtractClassProcessor(
     }
 
     fun run() {
-        //TODO
-        project.executeWriteCommand("name") {
+        project.runSynchronouslyWithProgress(
+            RefactoringBundle.message("progress.text"),
+            true
+        ) { runReadAction { collectDataForBuilding() } }
+
+        project.executeWriteCommand(KotlinExtractSuperclassHandler.REFACTORING_NAME) {
+            applyRefactoring(extractedClassBuilder, companionObjectBuilder)
+            performDelayedRefactoringRequests(project)
         }
     }
 }

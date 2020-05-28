@@ -71,15 +71,15 @@ class ExtractedClassBuilder private constructor(
         }
 
         argumentsAddedToExtractedClassConstructor.forEach {
-            result.getPrimaryConstructorParameterList()?.addParameter(it)
+            result.getPrimaryConstructorParameterList()?.addParameter(it.copy() as KtParameter)
         }
 
         implementedClassesOrInterfaces.forEach {
-            result.addSuperTypeListEntry(it)
+            result.addSuperTypeListEntry(it.copy() as KtSuperTypeListEntry)
         }
 
         thisClassExtractedDeclarations.forEach {
-            result.addDeclaration(it)
+            result.addDeclaration(it.copy() as KtDeclaration)
         }
 
         return result
