@@ -60,16 +60,16 @@ class KotlinExtractClassProcessor(
                     true,
                     companionObjectExtractedDeclarations,
                     extractedMemberDeclarations,
-                    listOf(),
-                    companionObject.name,
+                    companionObject.name ?: "companion", //TODO companion
                     targetPackage,
-                    leaveDelegates
+                    leaveDelegates,
+                    fixVisibilities,
+                    createInTheSameFile
                 )
             } else {
                 null
             }
 
-        val extractedClassTypeParameters = collectTypeParameters()
         val sourceExtractedDeclarations = extractedMemberDeclarations.filter { !it.inCompanionObject }
 
         extractedClassBuilder =
@@ -78,16 +78,12 @@ class KotlinExtractClassProcessor(
                 false,
                 sourceExtractedDeclarations,
                 extractedMemberDeclarations,
-                extractedClassTypeParameters,
                 targetClassName,
                 targetPackage,
-                leaveDelegates
+                leaveDelegates,
+                fixVisibilities,
+                createInTheSameFile
             )
-    }
-
-    private fun collectTypeParameters(): List<KtTypeParameter> {
-        //TODO
-        return listOf()
     }
 
     private fun applyRefactoring(extractedClassBuilder: ExtractedClassBuilder, companionObjectBuilder: ExtractedClassBuilder? = null) {

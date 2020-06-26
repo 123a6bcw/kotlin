@@ -1,20 +1,9 @@
 /*
- * Copyright 2010-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Copyright 2010-2020 JetBrains s.r.o. and Kotlin Programming Language contributors.
+ * Use of this source code is governed by the Apache 2.0 license that can be found in the license/LICENSE.txt file.
  */
 
-package org.jetbrains.kotlin.idea.refactoring.extractClass.ui
+package org.jetbrains.kotlin.idea.refactoring.extractClass
 
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.roots.JavaProjectRootsUtil
@@ -30,7 +19,6 @@ import com.intellij.ui.ReferenceEditorComboWithBrowseButton
 import com.intellij.ui.components.JBLabelDecorator
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.UIUtil
-import org.jetbrains.kotlin.idea.refactoring.extractClass.KotlinExtractClassProcessor
 import org.jetbrains.kotlin.idea.refactoring.memberInfo.KotlinMemberInfo
 import org.jetbrains.kotlin.idea.refactoring.memberInfo.KotlinMemberSelectionPanel
 import org.jetbrains.kotlin.idea.refactoring.memberInfo.extractClassMembers
@@ -42,7 +30,7 @@ import javax.swing.*
 import javax.swing.event.DocumentEvent
 
 class KotlinExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDialog(sourceClass.project, true) {
-    private val extractedClassNameField = JTextField()
+    private val extractedClassNameField = JTextField("${sourceClass.name}Production")
     private val extractedClassName: String
         get() {
             return extractedClassNameField.text.trim()
@@ -129,7 +117,7 @@ class KotlinExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDi
 
         val builder = FormBuilder.createFormBuilder()
             .addComponent(
-                JBLabelDecorator.createJBLabelDecorator(RefactorJBundle.message("extract.class.from.label", sourceClass.getQualifiedName()))
+                JBLabelDecorator.createJBLabelDecorator(RefactorJBundle.message("extract.class.from.label", sourceClass.fqName))
                     .setBold(true)
             )
             .addLabeledComponent(
@@ -146,7 +134,7 @@ class KotlinExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDi
 
         return builder.addVerticalGap(5).panel
     }
-
+    
     override fun createCenterPanel(): JComponent? {
         extractMemberInfoModel.apply {
             memberInfoChanged(MemberInfoChange(memberInfos))
@@ -157,7 +145,7 @@ class KotlinExtractClassDialog(val sourceClass: KtClassOrObject) : RefactoringDi
             val memberSelectionPanel = KotlinMemberSelectionPanel(
                 "Extract delegate", //TODO
                 extractMemberInfoModel.memberInfos,
-                RefactoringBundle.message("make.abstract")
+                null
             )
 
             memberSelectionPanel.table.memberInfoModel = extractMemberInfoModel

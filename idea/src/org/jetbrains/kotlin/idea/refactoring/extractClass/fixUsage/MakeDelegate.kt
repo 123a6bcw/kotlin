@@ -20,7 +20,7 @@ import org.jetbrains.kotlin.psi.KtElement
 import org.jetbrains.kotlin.psi.KtFunction
 import org.jetbrains.kotlin.psi.KtPsiFactory
 
-class MakeDelegate(private val element: KtElement, private val delegate: String, private val ktPsiFactory: KtPsiFactory) :
+class MakeDelegate(private val element: KtElement, private val delegate: String) :
     FixableUsageInfo(element) {
 
     override fun fixUsage() {
@@ -32,6 +32,8 @@ class MakeDelegate(private val element: KtElement, private val delegate: String,
     }
 
     private fun makeFunctionDelegate() {
+        val ktFactory = KtPsiFactory(element.project)
+
         if (element !is KtFunction) {
             return
         }
@@ -46,7 +48,7 @@ class MakeDelegate(private val element: KtElement, private val delegate: String,
         delegation.append(element.valueParameters.joinToString(separator = ",", transform = { parameter -> parameter.name!! }))
         delegation.append(");")
 
-        val delegationExpression = ktPsiFactory.createExpression(delegation.toString())
+        val delegationExpression = ktFactory.createExpression(delegation.toString())
         element.add(delegationExpression)
     }
 

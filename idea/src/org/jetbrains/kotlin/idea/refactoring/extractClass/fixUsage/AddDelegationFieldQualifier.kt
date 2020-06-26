@@ -7,10 +7,24 @@ package org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage
 
 import com.intellij.psi.PsiElement
 import com.intellij.refactoring.util.FixableUsageInfo
+import org.jetbrains.kotlin.psi.KtPsiFactory
 
-class AddDelegationFieldQualifier(reference: PsiElement, delegationFieldName: String) : FixableUsageInfo(reference) {
+class AddDelegationFieldQualifier(private val reference: PsiElement, private val delegationFieldName: String) :
+    FixableUsageInfo(reference) {
     override fun fixUsage() {
-        //TODO
+        val ktFactory = KtPsiFactory(reference.project)
+
+        val parent = reference.parent
+        val updatedReference = StringBuilder()
+        for (child in parent.children) {
+            if (child == reference) {
+                updatedReference.append("$delegationFieldName.${reference.text}")
+            } else {
+                updatedReference.append(child.text)
+            }
+        }
+
+        reference.replace(ktFactory.createExpression(updatedReference.toString()))
     }
 
 }

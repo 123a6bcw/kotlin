@@ -22,7 +22,6 @@ import org.jetbrains.kotlin.asJava.toLightClass
 import org.jetbrains.kotlin.idea.KotlinBundle
 import org.jetbrains.kotlin.idea.refactoring.SeparateFileWrapper
 import org.jetbrains.kotlin.idea.refactoring.chooseContainerElementIfNecessary
-import org.jetbrains.kotlin.idea.refactoring.extractClass.ui.KotlinExtractClassDialog
 import org.jetbrains.kotlin.idea.refactoring.getExtractionContainers
 import org.jetbrains.kotlin.idea.refactoring.showWithTransaction
 import org.jetbrains.kotlin.idea.util.isExpectDeclaration
@@ -44,7 +43,7 @@ object KotlinExtractClassHandler : RefactoringActionHandler, ElementsHandler {
         val klass = element.getNonStrictParentOfType<KtClassOrObject>() ?: return
         if (!checkClass(klass, editor)) return
         editor.scrollingModel.scrollToCaret(ScrollType.MAKE_VISIBLE)
-        selectElements(klass, editor)
+        doInvoke(klass)
     }
 
     override fun invoke(project: Project, elements: Array<out PsiElement>, dataContext: DataContext?) {
@@ -52,7 +51,7 @@ object KotlinExtractClassHandler : RefactoringActionHandler, ElementsHandler {
         val editor = CommonDataKeys.EDITOR.getData(dataContext)
         val klass = PsiTreeUtil.findCommonParent(*elements)?.getNonStrictParentOfType<KtClassOrObject>() ?: return
         if (!checkClass(klass, editor)) return
-        selectElements(klass, editor)
+        doInvoke(klass)
     }
 
     private fun checkClass(klass: KtClassOrObject, editor: Editor?): Boolean {

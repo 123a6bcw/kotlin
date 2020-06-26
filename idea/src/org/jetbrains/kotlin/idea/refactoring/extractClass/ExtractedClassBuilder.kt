@@ -12,34 +12,45 @@ import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.refactoring.util.FixableUsageInfo
 import org.jetbrains.kotlin.descriptors.CallableMemberDescriptor
+import org.jetbrains.kotlin.idea.caches.resolve.analyze
 import org.jetbrains.kotlin.idea.caches.resolve.resolveToDescriptorIfAny
-import org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage.AddDelegationFieldQualifier
-import org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage.MakeDelegate
-import org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage.RemoveElement
-import org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage.ReplaceCompanionObjectReference
-import org.jetbrains.kotlin.idea.refactoring.isInterfaceClass
+import org.jetbrains.kotlin.idea.codeInsight.DescriptorToSourceUtilsIde
+import org.jetbrains.kotlin.idea.refactoring.extractClass.fixUsage.*
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.js.resolve.diagnostics.findPsi
 import org.jetbrains.kotlin.lexer.KtModifierKeywordToken
+import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.psiUtil.getChildrenOfType
 import org.jetbrains.kotlin.psi.psiUtil.getQualifiedExpressionForSelector
+import org.jetbrains.kotlin.psi.psiUtil.isAncestor
+import org.jetbrains.kotlin.resolve.BindingContext
+import org.jetbrains.kotlin.resolve.calls.callUtil.getType
+import org.jetbrains.kotlin.resolve.lazy.BodyResolveMode
+import org.jetbrains.kotlin.types.typeUtil.isInterface
+import org.jetbrains.uast.getContainingUAnnotationEntry
 
 class ExtractedClassBuilder private constructor(
     private val sourceClass: KtClassOrObject,
     private val isCompanionObject: Boolean,
-    private val thisClassExtractedDeclarations: List<KtDeclaration>,
-    private val allExtractedDeclaration: List<KtDeclaration>,
-    extractedClassTypeParameters: List<KtTypeParameter>, //TODO add type parameters to extracted class
-    private val targetName: String?,
-    targetPackage: String, //TODO add package and FQ names usage, shorten references
-    private val leaveDelegates: Boolean
+    private val thisClassExtractedMembers: List<KtElement>,
+    private val allExtractedMembers: List<KtElement>,
+    private val targetName: String,
+    private val targetPackage: String, //TODO add package and FQ names usage, shorten references
+    private val leaveDelegates: Boolean,
+    private val fixVisibilities: Boolean,
+    private val placeInSameFile: Boolean
 ) {
     private val project = sourceClass.project
     private val ktFactory = KtPsiFactory(project)
 
-    private val argumentsAddedToExtractedClassConstructor: List<KtParameter>
-    private val implementedClassesOrInterfaces: List<KtSuperTypeListEntry>
-    private val usagesToFix: List<FixableUsageInfo>
+    private val argumentsAddedToExtractedClassConstructor = mutableListOf<KtParameter>()
+    private val implementedClassesOrInterfaces = mutableListOf<KtSuperTypeListEntry>()
+    private val usagesToFix = mutableListOf<FixableUsageInfo>()
+
+    private val extractedClassTypeParameters = mutableListOf<KtTypeParameter>()
+
+    private val bindingContext = sourceClass.analyze(BodyResolveMode.PARTIAL)
 
     private val originalClass = if (isCompanionObject) {
         sourceClass.parent
@@ -47,10 +58,28 @@ class ExtractedClassBuilder private constructor(
         sourceClass
     }
 
+    private var shouldCreateSourceReferenceInExtractedClass: Boolean = false
+
     init {
-        argumentsAddedToExtractedClassConstructor = collectArgumentsForExtractedClassConstructor()
-        implementedClassesOrInterfaces = getImplementedClassesOrInterfaces()
-        usagesToFix = collectUsagesToFix()
+        collectReferenceUsagesToFix()
+        getImplementedClassesOrInterfaces()
+        collectExtractedClassTypeParameters()
+
+        processValsWithOutOfPlaceInitialisationAndCollectExtractedClassConstructorParameters()
+
+        if (shouldCreateSourceReferenceInExtractedClass) {
+            argumentsAddedToExtractedClassConstructor.add(
+                ktFactory.createParameter(
+                    "private val " + getDelegationFieldName(sourceClass.name) + " : " + sourceClass.name
+                )
+            )
+        }
+    }
+
+    private fun fixUsages() {
+        for (usage in usagesToFix) {
+            usage.fixUsage()
+        }
     }
 
     fun createExtractedClass(): KtClassOrObject {
@@ -73,46 +102,175 @@ class ExtractedClassBuilder private constructor(
         argumentsAddedToExtractedClassConstructor.forEach {
             result.getPrimaryConstructorParameterList()?.addParameter(it.copy() as KtParameter)
         }
-
         implementedClassesOrInterfaces.forEach {
             result.addSuperTypeListEntry(it.copy() as KtSuperTypeListEntry)
         }
 
-        thisClassExtractedDeclarations.forEach {
+        thisClassExtractedMembers.forEach {
             result.addDeclaration(it.copy() as KtDeclaration)
         }
 
         return result
     }
 
-    private fun collectArgumentsForExtractedClassConstructor(): List<KtParameter> {
-        val result = mutableListOf<KtParameter>()
+    private fun collectExtractedClassTypeParameters(): List<KtTypeParameter> {
+        return listOf()
+    }
 
-        for (declaration in thisClassExtractedDeclarations) {
-            if (declaration !is KtProperty || declaration.isVar) {
+    private fun processValsWithOutOfPlaceInitialisationAndCollectExtractedClassConstructorParameters() {
+        //TODO if property have var or function call in initializer, than it's a red flag:
+        // user have to bother himself how to correctly init this.
+        // Same for initialising in the several init's with local variables etc.
+        // Otherwise, there is no problem
+
+        val sourceClassInitParametersUsedInExtractedMemberInitializer = linkedSetOf<KtParameter>()
+
+        for (member in thisClassExtractedMembers) {
+            if (member !is KtProperty || !member.hasDelegateExpressionOrInitializer()) {
                 continue
             }
 
-            if (declaration.hasDelegateExpressionOrInitializer() || declaration.hasDelegate() || declaration.getter != null) {
-                continue
+            for (reference in member.getChildrenOfType<KtReferenceExpression>()) {
+                val resolved = reference.mainReference.resolve()
+                if (resolved is KtParameter && sourceClass.primaryConstructorParameters.contains(resolved) && !resolved.hasValOrVar()) {
+                    sourceClassInitParametersUsedInExtractedMemberInitializer.add(resolved)
+                }
             }
-
-            //TODO find initializer and add this value to initializer
         }
 
-        return result
+        val declarationsMovedAsParameters = thisClassExtractedMembers.filterIsInstance<KtProperty>().filterNot {
+            it.isVar || it.hasDelegateExpressionOrInitializer() || it.hasDelegate() || it.getter != null
+        }
+
+        val fromDeclarationToInitializerInClassInitializer = mutableMapOf<KtDeclaration, KtExpression>()
+        val fromConstructorToDeclarationToInitializer = mutableMapOf<KtElement, MutableMap<KtDeclaration, KtExpression>>()
+
+        var lastUsedAnonymousInitializer: KtAnonymousInitializer? = null
+
+        fun processInitializer(constructorOrClassInitializer: KtElement, isConstructor: Boolean) {
+            val assigmentExpressions =
+                PsiTreeUtil.findChildrenOfType(constructorOrClassInitializer, KtBinaryExpression::class.java).filter {
+                    it.operationToken == KtTokens.EQ && it.left is KtReferenceExpression && it.right != null
+                }
+
+            for (assigmentExpression in assigmentExpressions) {
+                val resolved = assigmentExpression.left?.mainReference?.resolve() ?: continue
+
+                if (declarationsMovedAsParameters.contains(resolved)) {
+                    continue
+                }
+
+                usagesToFix.add(RemoveElement(assigmentExpression))
+
+                if (isConstructor) {
+                    assigmentExpression.right?.let {
+                        fromConstructorToDeclarationToInitializer.putIfAbsent(constructorOrClassInitializer, mutableMapOf())
+                        fromConstructorToDeclarationToInitializer[constructorOrClassInitializer]!![resolved as KtDeclaration] =
+                            it
+                    }
+                } else {
+                    assigmentExpression.right?.let {
+                        lastUsedAnonymousInitializer = constructorOrClassInitializer as KtAnonymousInitializer
+                        fromDeclarationToInitializerInClassInitializer[resolved as KtDeclaration] = it
+                    }
+                }
+            }
+        }
+
+        for (initializer in sourceClass.getAnonymousInitializers()) {
+            processInitializer(initializer, true)
+        }
+
+        for (initializer in sourceClass.secondaryConstructors) {
+            processInitializer(initializer, false)
+        }
+
+        addExtractedClassFieldFix(
+            fromDeclarationToInitializerInClassInitializer,
+            fromConstructorToDeclarationToInitializer,
+            sourceClassInitParametersUsedInExtractedMemberInitializer, lastUsedAnonymousInitializer
+        )
+
+        collectArgumentsAddedToExtractedClassConstructor(
+            sourceClassInitParametersUsedInExtractedMemberInitializer,
+            declarationsMovedAsParameters
+        )
+    }
+
+    private fun collectArgumentsAddedToExtractedClassConstructor(
+        sourceClassInitParametersUsedInExtractedMemberInitializer: LinkedHashSet<KtParameter>,
+        declarationsMovedAsParameters: List<KtProperty>
+    ) {
+        sourceClassInitParametersUsedInExtractedMemberInitializer.forEach {
+            argumentsAddedToExtractedClassConstructor.add(it.copy() as KtParameter)
+        }
+
+        declarationsMovedAsParameters.forEach { declaration ->
+            argumentsAddedToExtractedClassConstructor.add(
+                ktFactory.createParameter(
+                    declaration.name + "Init : " + declaration.getType(bindingContext).toString()
+                )
+            ) //TODO Init0123...
+        }
+    }
+
+    private fun addExtractedClassFieldFix(
+        fromDeclarationToInitializerInClassInitializer: Map<KtDeclaration, KtExpression>,
+        fromConstructorToDeclarationToInitializer: Map<KtElement, Map<KtDeclaration, KtExpression>>,
+        sourceClassInitParametersUsedInExtractedMemberInitializer: LinkedHashSet<KtParameter>,
+        lastUsedAnonymousInitializer: KtAnonymousInitializer?
+    ) {
+        if (fromDeclarationToInitializerInClassInitializer.isEmpty() && fromConstructorToDeclarationToInitializer.isEmpty()) {
+            usagesToFix.add(
+                AddExtractedClassFieldWithInitialisationByParameters(
+                    sourceClass,
+                    targetName,
+                    getDelegationFieldName(targetName),
+                    sourceClassInitParametersUsedInExtractedMemberInitializer,
+                    shouldCreateSourceReferenceInExtractedClass
+                )
+            )
+        } else {
+            AddExtractedClassFieldDeclaration(sourceClass, targetName, getDelegationFieldName(targetName))
+
+            if (fromConstructorToDeclarationToInitializer.isEmpty()) {
+                usagesToFix.add(
+                    AddExtractedClassFieldInitialisationInTheLastInit(
+                        sourceClass,
+                        sourceClassInitParametersUsedInExtractedMemberInitializer,
+                        lastUsedAnonymousInitializer,
+                        fromDeclarationToInitializerInClassInitializer,
+                        shouldCreateSourceReferenceInExtractedClass
+                    )
+                )
+            } else {
+                for (constructor in sourceClass.secondaryConstructors) {
+                    AddExtractedClassFieldInitialisationAtTheEndOfConstructor(
+                        sourceClass,
+                        sourceClassInitParametersUsedInExtractedMemberInitializer,
+                        fromDeclarationToInitializerInClassInitializer,
+                        fromConstructorToDeclarationToInitializer[constructor],
+                        shouldCreateSourceReferenceInExtractedClass
+                    )
+                }
+            }
+        }
     }
 
     private fun getImplementedClassesOrInterfaces(): List<KtSuperTypeListEntry> {
         val result = mutableListOf<KtSuperTypeListEntry>()
 
-        for (superType in sourceClass.superTypeListEntries) {
-            val superInterface: KtClassOrObject? =
-                null //TODO resolve KtClass from KtSuperTypeListEntry. An example was at superclass refactoring
+        for (superTypeListEntry in sourceClass.superTypeListEntries) {
+            val superInterfaceType =
+                superTypeListEntry.analyze(BodyResolveMode.PARTIAL)[BindingContext.TYPE, superTypeListEntry.typeReference]
+                    ?: continue
 
-            if (superInterface == null || !superInterface.isInterfaceClass()) {
+            if (!superInterfaceType.isInterface()) {
                 continue
             }
+
+            val superClassDescriptor = superInterfaceType.constructor.declarationDescriptor ?: continue
+            val superInterface = DescriptorToSourceUtilsIde.getAnyDeclaration(project, superClassDescriptor) as? KtClass ?: continue
 
             var interfaceRealised = true
 
@@ -130,7 +288,7 @@ class ExtractedClassBuilder private constructor(
                 //TODO Probably there is an easier way to check this (without descriptors)
                 for (overriddenDescriptor in descriptor.overriddenDescriptors) {
                     if (overriddenDescriptor.findPsi() in interfaceDeclarations) {
-                        if (sourceDeclaration !in thisClassExtractedDeclarations) {
+                        if (sourceDeclaration !in thisClassExtractedMembers) {
                             interfaceRealised = false
                         }
                     }
@@ -138,21 +296,15 @@ class ExtractedClassBuilder private constructor(
             }
 
             if (interfaceRealised) {
-                result.add(superType)
+                result.add(superTypeListEntry)
             }
         }
 
         return result
     }
 
-    private fun fixUsages() {
-        for (usage in usagesToFix) {
-            usage.fixUsage()
-        }
-    }
-
-    private fun inExtractedDeclarations(reference: PsiElement): Boolean {
-        return allExtractedDeclaration.any { PsiTreeUtil.isAncestor(it, reference, false) }
+    private fun inExtractedDeclarations(referencedElement: PsiElement): Boolean {
+        return allExtractedMembers.contains(referencedElement)
     }
 
     private fun getDelegationFieldName(name: String?): String {
@@ -165,61 +317,91 @@ class ExtractedClassBuilder private constructor(
         return simpleClassName
     }
 
-    private fun collectUsagesToFix(): List<FixableUsageInfo> {
-        //TODO visibility modifiers, docPolicy, sealed class
-        val result = mutableListOf<FixableUsageInfo>()
+    private fun collectReferenceUsagesToFix() {
+        for (member in thisClassExtractedMembers) {
+            collectFixesForExtractedMemberUsages(member)
+            collectFixesForSourceUsagesInExtractedMember(member)
+        }
+    }
 
-        for (declaration in thisClassExtractedDeclarations) {
-            val scope = GlobalSearchScope.allScope(project)
-            val references = ReferencesSearch.search(declaration, scope)
+    private fun collectFixesForExtractedMemberUsages(member: KtElement) {
+        val scope = GlobalSearchScope.allScope(project) //TODO fix scope (probably not "allScope")
+        val references = ReferencesSearch.search(member, scope)
 
-            for (reference in references) {
-                val referenceElement = reference.element
+        var shouldBeInternal = false
 
-                if (inExtractedDeclarations(referenceElement)) {
-                    continue
-                }
-
-                if (isCompanionObject) {
-                    result.add(ReplaceCompanionObjectReference(referenceElement, sourceClass, targetName))
-                } else {
-                    result.add(AddDelegationFieldQualifier(referenceElement, getDelegationFieldName(targetName)))
-                }
+        for (reference in references) {
+            val referenceElement = reference.element
+            val referencedElement = if (referenceElement is KtReferenceExpression) {
+                referenceElement.mainReference.resolve() ?: continue
+            } else {
+                continue
             }
 
-            declaration.accept(object : PsiRecursiveElementVisitor() {
-                override fun visitElement(element: PsiElement) {
-                    if (element is KtReferenceExpression) {
-                        val qualifier = element.getQualifiedExpressionForSelector()
-                        if (qualifier == null || qualifier is KtThisExpression) {
-                            val resolved = element.mainReference.resolve()
+            if (inExtractedDeclarations(referencedElement)) {
+                continue
+            }
 
-                            if (resolved != null && PsiTreeUtil.isAncestor(originalClass, resolved, false)) {
-                                if (qualifier == null) {
-                                    result.add(AddDelegationFieldQualifier(element, getDelegationFieldName(targetName)))
-                                }
-                            }
-                        }
-                    }
+            shouldBeInternal = true
 
-                    super.visitElement(element)
-                }
-            })
-
-            if (leaveDelegates || declaration.hasModifier(KtModifierKeywordToken.keywordModifier("override"))) {
-                val delegate = if (isCompanionObject) {
-                    targetName ?: ""
-                } else {
-                    getDelegationFieldName(targetName)
-                }
-
-                result.add(MakeDelegate(declaration, delegate, ktFactory))
+            if (isCompanionObject) {
+                usagesToFix.add(ReplaceCompanionObjectReference(referenceElement, sourceClass, targetName))
             } else {
-                result.add(RemoveElement(declaration))
+                usagesToFix.add(AddDelegationFieldQualifier(referenceElement, getDelegationFieldName(targetName)))
             }
         }
 
-        return result
+        if (fixVisibilities && shouldBeInternal) {
+            usagesToFix.add(MakeAtLeastInternal(member))
+        }
+    }
+
+    private fun collectFixesForSourceUsagesInExtractedMember(member: KtElement) {
+        val sourceMembersShouldBeInternal = mutableSetOf<KtElement>()
+
+        member.accept(object : PsiRecursiveElementVisitor() {
+            override fun visitElement(element: PsiElement) {
+                if (element is KtReferenceExpression) {
+                    val qualifier = element.getQualifiedExpressionForSelector()
+                    if (qualifier == null || qualifier is KtThisExpression) {
+                        val resolved = element.mainReference.resolve()
+
+                        if (resolved != null
+                            && !inExtractedDeclarations(resolved)
+                            && sourceClass.declarations.contains(resolved) //TODO if companion object, should also check declarations in parent
+                        ) {
+
+                            sourceMembersShouldBeInternal.add(resolved as KtElement)
+
+                            if (qualifier == null) {
+                                shouldCreateSourceReferenceInExtractedClass = true
+                                usagesToFix.add(AddDelegationFieldQualifier(element, getDelegationFieldName(sourceClass.name)))
+                            }
+                        }
+                    }
+                }
+
+                super.visitElement(element)
+            }
+        })
+
+        if (leaveDelegates || member is KtDeclaration && member.hasModifier(KtModifierKeywordToken.keywordModifier("override"))) {
+            val delegate = if (isCompanionObject) {
+                targetName ?: ""
+            } else {
+                getDelegationFieldName(targetName)
+            }
+
+            usagesToFix.add(MakeDelegate(member, delegate))
+        } else {
+            usagesToFix.add(RemoveElement(member))
+        }
+
+        if (fixVisibilities) {
+            for (sourceMember in sourceMembersShouldBeInternal) {
+                usagesToFix.add(MakeAtLeastInternal(sourceMember))
+            }
+        }
     }
 
     companion object FACTORY {
@@ -228,20 +410,22 @@ class ExtractedClassBuilder private constructor(
             isCompanionObject: Boolean,
             thisClassExtractedDeclarations: List<KtDeclaration>,
             allExtractedDeclaration: List<KtDeclaration>,
-            extractedClassTypeParameters: List<KtTypeParameter>,
-            targetName: String?,
+            targetName: String,
             targetPackage: String,
-            leaveDelegates: Boolean
+            leaveDelegates: Boolean,
+            fixVisibilities: Boolean,
+            placeInSameFile: Boolean
         ): ExtractedClassBuilder {
             return ExtractedClassBuilder(
                 sourceClass,
                 isCompanionObject,
                 thisClassExtractedDeclarations,
                 allExtractedDeclaration,
-                extractedClassTypeParameters,
                 targetName,
                 targetPackage,
-                leaveDelegates
+                leaveDelegates,
+                fixVisibilities,
+                placeInSameFile
             )
         }
     }
